@@ -1,0 +1,58 @@
+name: Build and deploy .NET Core Web API to Azure App Service
+on:
+  push:
+    branches:
+    - master
+    
+env:
+  AZURE_WEBAPP_NAME: 'TouchdownAndBigPlayAlertApi'
+  AZURE_WEBAPP_PACKAGE_PATH: './published'
+  AZURE_RESOURCE_GROUP: 'FantasyFootball'
+  CONFIGURATION: Release
+  DOTNET_VERSION: '8.0.x'
+  WORKING_DIRECTORY: .
+  
+jobs:
+  build-and-deploy:
+    runs-on: self-hosted
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+    - name: 'Checkout GitHub Action'
+      uses: actions/checkout@v4
+
+    - name: Azure login
+      uses: azure/login@v2
+      with:
+        auth-type: IDENTITY
+        tenant-id: ${{ secrets.TENANT_ID }}
+        subscription-id: ${{ secrets.SUBSCRIPTION_ID }}
+        enable-AzPSSession: false
+      
+    - name: Setup DotNet ${{ env.DOTNET_VERSION }} Environment
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+        
+    - name: Restore
+      run: dotnet restore "${{ env.WORKING_DIRECTORY }}/TouchdownAndBigPlayAlertApi.csproj"
+      
+    - name: Build
+      run: dotnet build "${{ env.WORKING_DIRECTORY }}/TouchdownAndBigPlayAlertApi.csproj" --configuration ${{ env.CONFIGURATION }} --no-restore
+      
+    - name: Publish
+      run: dotnet publish "${{ env.WORKING_DIRECTORY }}/TouchdownAndBigPlayAlertApi.csproj" --configuration ${{ env.CONFIGURATION }} --no-build --output "${{ env.AZURE_WEBAPP_PACKAGE_PATH }}"
+      
+    - name: Publish Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: webapp
+        path: ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}
+
+    - name: 'Deploy to Azure Web App'
+      uses: azure/webapps-deploy@v3
+      with:
+        app-name: ${{ env.AZURE_WEBAPP_NAME }}
+        package: ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}
