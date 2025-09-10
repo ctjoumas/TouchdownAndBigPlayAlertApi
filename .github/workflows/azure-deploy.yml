@@ -10,6 +10,7 @@ env:
   AZURE_RESOURCE_GROUP: 'FantasyFootball'
   CONFIGURATION: Release
   DOTNET_VERSION: '8.0.x'
+  DOTNET_INSTALL_DIR: "./.dotnet"
   WORKING_DIRECTORY: .
   
 jobs:
@@ -32,7 +33,7 @@ jobs:
         enable-AzPSSession: false
       
     - name: Setup DotNet ${{ env.DOTNET_VERSION }} Environment
-      uses: actions/setup-dotnet@v3
+      uses: actions/setup-dotnet@v4
       with:
         dotnet-version: ${{ env.DOTNET_VERSION }}
         
