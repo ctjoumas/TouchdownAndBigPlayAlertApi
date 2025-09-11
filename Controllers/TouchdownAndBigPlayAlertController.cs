@@ -14,6 +14,16 @@ namespace TouchdownAndBigPlayAlertApi.Controllers
         }
 
         /// <summary>
+        /// Simple health check endpoint
+        /// </summary>
+        /// <returns></returns>
+        [HttpGet("health")]
+        public IActionResult Health()
+        {
+            return Ok(new { status = "API is running", timestamp = DateTime.UtcNow });
+        }
+
+        /// <summary>
         /// Parses touchdowns and big plays for each game that each player in the active rosters for both owners
         /// are playing in.
         /// </summary>
