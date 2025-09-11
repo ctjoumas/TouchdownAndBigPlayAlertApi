@@ -24,6 +24,16 @@ namespace TouchdownAndBigPlayAlertApi.Controllers
         }
 
         /// <summary>
+        /// Simple POST test endpoint
+        /// </summary>
+        /// <returns></returns>
+        [HttpPost("test")]
+        public IActionResult TestPost()
+        {
+            return Ok(new { message = "POST endpoint works", timestamp = DateTime.UtcNow });
+        }
+
+        /// <summary>
         /// Parses touchdowns and big plays for each game that each player in the active rosters for both owners
         /// are playing in.
         /// </summary>
