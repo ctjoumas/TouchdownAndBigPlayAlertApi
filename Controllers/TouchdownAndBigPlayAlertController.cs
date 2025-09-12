@@ -1,3 +1,5 @@
+using Azure.Identity;
+using Azure.Messaging.ServiceBus;
 using Microsoft.AspNetCore.Mvc;
 
 namespace TouchdownAndBigPlayAlertApi.Controllers
@@ -38,6 +40,47 @@ namespace TouchdownAndBigPlayAlertApi.Controllers
         public IActionResult TestPost()
         {
             return Ok(new { message = "POST endpoint works", timestamp = DateTime.UtcNow });
+        }
+
+        [HttpGet("check-service-bus-messages")]
+        public async Task<IActionResult> CheckServiceBusMessages()
+        {
+            try
+            {
+                string serviceBusNamespace = "fantasyfootballstattracker.servicebus.windows.net";
+                string queueName = "touchdownqueue";
+
+                ServiceBusClient client = new ServiceBusClient(serviceBusNamespace, new DefaultAzureCredential());
+                ServiceBusReceiver receiver = client.CreateReceiver(queueName, new ServiceBusReceiverOptions
+                {
+                    ReceiveMode = ServiceBusReceiveMode.PeekLock
+                });
+
+                var messages = await receiver.PeekMessagesAsync(maxMessages: 10);
+
+                var messageDetails = messages.Select(msg => new
+                {
+                    MessageId = msg.MessageId,
+                    ContentType = msg.ContentType,
+                    Body = msg.Body.ToString(),
+                    Properties = msg.ApplicationProperties,
+                    EnqueuedTime = msg.EnqueuedTime,
+                    Size = msg.Body.ToArray().Length
+                }).ToList();
+
+                await receiver.DisposeAsync();
+                await client.DisposeAsync();
+
+                return Ok(new
+                {
+                    MessageCount = messages.Count,
+                    Messages = messageDetails
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message, details = ex.ToString() });
+            }
         }
 
         /// <summary>
