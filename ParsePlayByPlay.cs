@@ -31,11 +31,11 @@
             _logger = logger;
         }
 
-        public async Task RunParser()
+        public async Task RunParser(IConfiguration config)
         {
             Hashtable gamesToParse = getGamesToParse(_logger);
 
-            await parseTouchdownsAndBigPlays(gamesToParse, _logger);
+            await parseTouchdownsAndBigPlays(gamesToParse, config, _logger);
         }
 
         /// <summary>
@@ -147,7 +147,7 @@
         /// </summary>
         /// <param name="gamesToParse">Key is the Espn Game ID and the value is the list of players playing in the game</param>
         /// <param name="log">Logger</param>
-        public async Task parseTouchdownsAndBigPlays(Hashtable gamesToParse, ILogger log)//, IConfiguration configurationBuilder)
+        public async Task parseTouchdownsAndBigPlays(Hashtable gamesToParse, IConfiguration configuration, ILogger log)
         {
             JObject playByPlayJsonObject;
 
@@ -174,8 +174,8 @@
 
                     List<PlayDetails> playersInGame = (List<PlayDetails>)gamesToParse[key];
 
-                    await ParsePlayerBigPlaysForGame(int.Parse((string)key), playByPlayJsonObject, playersInGame, log);//, configurationBuilder);
-                    await ParsePlayerTouchdownsForGame(int.Parse((string)key), playByPlayJsonObject, playersInGame, log);//, configurationBuilder);
+                    await ParsePlayerBigPlaysForGame(int.Parse((string)key), playByPlayJsonObject, playersInGame, configuration, log);
+                    await ParsePlayerTouchdownsForGame(int.Parse((string)key), playByPlayJsonObject, playersInGame, configuration, log);
                 }
             }
         }
@@ -215,7 +215,7 @@
             return playByPlayJsonObject;
         }
 
-        private async Task ParsePlayerBigPlaysForGame(int espnGameId, JObject playByPlayJsonObject, List<PlayDetails> playersInGame, ILogger log)//, IConfiguration configurationBuilder)
+        private async Task ParsePlayerBigPlaysForGame(int espnGameId, JObject playByPlayJsonObject, List<PlayDetails> playersInGame, IConfiguration configuration, ILogger log)
         {
             JToken driveTokens = playByPlayJsonObject.SelectToken("page.content.gamepackage.allPlys");
 
@@ -394,7 +394,7 @@
                                                 if (bigPlayAdded)
                                                 {
                                                     log.LogInformation("Added big play for " + playDetails.PlayerName);
-                                                    await sendPlayMessage(playDetails);//, configurationBuilder);
+                                                    await sendPlayMessage(playDetails, configuration);
                                                 }
                                                 else
                                                 {
@@ -419,7 +419,7 @@
         /// <param name="espnGameId"></param>
         /// <param name="playByPlayJsonObject"></param>
         /// <param name="playersInGame"></param>
-        private async Task ParsePlayerTouchdownsForGame(int espnGameId, JObject playByPlayJsonObject, List<PlayDetails> playersInGame, ILogger log)//, IConfiguration configurationBuilder)
+        private async Task ParsePlayerTouchdownsForGame(int espnGameId, JObject playByPlayJsonObject, List<PlayDetails> playersInGame, IConfiguration configuration, ILogger log)
         {
             // flag determining whether or not a touchdown was processed for a player so we know if we should add this
             // to the database and send the message to the service hub so the logic app will process it and send a text
@@ -442,7 +442,7 @@
 
                     if (scoringType.Equals("TD"))
                     {
-                        string touchdownText = ((JValue)quarterScoringPlay.SelectToken("text")).Value.ToString();
+                        string touchdownText = ((JValue)quarterScoringPlay.SelectToken("playText")).Value.ToString();
 
                         // we will cache the quarter and game clock so the next time we check the live JSON data, we don't
                         // send a message to the service bus that the same touchdown was scored
@@ -468,7 +468,7 @@
 
                             string touchdownMessage = "🎉 Defensive Touchdown! " + playDetails.PlayerName + " blocked a kick and returned it for a TD!";
 
-                            await SendDefensiveTouchdownMessage(espnGameId, playDetails, quarterScoringPlay, playersInGame, quarter, gameClock, "", log);
+                            await SendDefensiveTouchdownMessage(espnGameId, playDetails, quarterScoringPlay, playersInGame, quarter, gameClock, "", configuration, log);
                         }
                         else if (touchdownText.ToLower().Contains("interception return"))
                         {
@@ -476,7 +476,7 @@
 
                             string touchdownMessage = "🎉 Defensive Touchdown! " + playDetails.PlayerName + " just got a pick 6!";
 
-                            await SendDefensiveTouchdownMessage(espnGameId, playDetails, quarterScoringPlay, playersInGame, quarter, gameClock, "", log);
+                            await SendDefensiveTouchdownMessage(espnGameId, playDetails, quarterScoringPlay, playersInGame, quarter, gameClock, "", configuration, log);
                         }
                         else if (touchdownText.ToLower().Contains("punt return"))
                         {
@@ -484,7 +484,7 @@
 
                             string touchdownMessage = "🎉 Defensive Touchdown! " + playDetails.PlayerName + " just returned a punt for a TD!";
 
-                            await SendDefensiveTouchdownMessage(espnGameId, playDetails, quarterScoringPlay, playersInGame, quarter, gameClock, "", log);
+                            await SendDefensiveTouchdownMessage(espnGameId, playDetails, quarterScoringPlay, playersInGame, quarter, gameClock, "", configuration, log);
                         }
                         // it's an offensive TD
                         else
@@ -498,7 +498,7 @@
                                 //   "Christian McCaffrey 1 Yd Rush, R.Gould extra point is GOOD, Center-T.Pepper, Holder-M.Wishnowsky."
                                 //   "Austin Ekeler 1 Yd Run (Cameron Dicker Kick)" or
                                 //   
-                                // Pass (it looks likt he first one here is what is shown during live games; when games end, it changes to the 2nd, so we should only really
+                                // Pass (it looks like the first one here is what is shown during live games; when games end, it changes to the 2nd, so we should only really
                                 // care about the first one)
                                 //   "George Kittle Pass From Brock Purdy for 28 Yds, R.Gould extra point is GOOD, Center-T.Pepper, Holder-M.Wishnowsky."
                                 //   "Tyreek Hill 60 Yd pass from Tua Tagovailoa (Jason Sanders Kick)" (this will work for both WR/RB and QB) or
@@ -506,6 +506,7 @@
                                 // Fumble Recovery:
                                 //   "Tyreek Hill 57 Yd Fumble Recovery (Jason Sanders Kick)" for an offensive fumble recovery for a TD
                                 // let's check for a player who rushed or received a TD or picked up an offensive fumble and ran it in for a TD
+
                                 if (touchdownText.StartsWith(playDetails.PlayerName))
                                 {
                                     // regardless of the play, we need to get the yardage
@@ -583,7 +584,7 @@
                                     {
                                         log.LogInformation(playDetails.Message);
 
-                                        await sendPlayMessage(playDetails);//, configurationBuilder);
+                                        await sendPlayMessage(playDetails, configuration);
                                     }
                                     else
                                     {
@@ -610,7 +611,7 @@
         /// <param name="quarter">The querter the TD occurred</param>
         /// <param name="gameClock">The time the TD occurred</param>
         /// <param name="playMessage">The message to be sent</param>
-        private async Task SendDefensiveTouchdownMessage(int espnGameId, PlayDetails playDetails, JToken scoringPlayToken, List<PlayDetails> playersInGame, int quarter, string gameClock, string playMessage, ILogger log)
+        private async Task SendDefensiveTouchdownMessage(int espnGameId, PlayDetails playDetails, JToken scoringPlayToken, List<PlayDetails> playersInGame, int quarter, string gameClock, string playMessage, IConfiguration configuration, ILogger log)
         {
             // if this object isn't null, an owner has this defense, so send the text alert
             if (playDetails != null)
@@ -624,7 +625,7 @@
 
                     log.LogInformation(playDetails.Message);
 
-                    await sendPlayMessage(playDetails);
+                    await sendPlayMessage(playDetails, configuration);
                 }
                 else
                 {
@@ -844,41 +845,48 @@
         /// </summary>
         /// <param name="playDetails">The details of the particular play</param>
         /// <returns></returns>
-        private async Task sendPlayMessage(PlayDetails playDetails)//, IConfiguration configurationBuilder)
+        private async Task sendPlayMessage(PlayDetails playDetails, IConfiguration configuration)
         {
-            // connection string to your Service Bus namespace
-            string serviceBusSharedAccessSignature = Environment.GetEnvironmentVariable("ServiceBusSharedAccessKey", EnvironmentVariableTarget.Process);
-            string connectionString = "Endpoint=sb://fantasyfootballstattracker.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=" + serviceBusSharedAccessSignature;
-
-            // name of your Service Bus queue
-            string queueName = "touchdownqueue";
-
-            // the client that owns the connection and can be used to create senders and receivers
-            ServiceBusClient client;
-
-            // the sender used to publish messages to the queue
-            ServiceBusSender sender;
-
-            // The Service Bus client types are safe to cache and use as a singleton for the lifetime
-            // of the application, which is best practice when messages are being published or read
-            // regularly.
-            //
-            // Create the clients that we'll use for sending and processing messages.
-            client = new ServiceBusClient(connectionString);
-            sender = client.CreateSender(queueName);
-
             try
             {
-                ServiceBusMessage message = new ServiceBusMessage(JsonConvert.SerializeObject(playDetails));
+                // connection string to your Service Bus namespace
+                string serviceBusSharedAccessSignature = configuration["ServiceBusSharedAccessKey"];
+                string connectionString = "Endpoint=sb://fantasyfootballstattracker.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=" + serviceBusSharedAccessSignature;
 
-                await sender.SendMessageAsync(message);
+                // name of your Service Bus queue
+                string queueName = "touchdownqueue";
+
+                // the client that owns the connection and can be used to create senders and receivers
+                ServiceBusClient client;
+
+                // the sender used to publish messages to the queue
+                ServiceBusSender sender;
+
+                // The Service Bus client types are safe to cache and use as a singleton for the lifetime
+                // of the application, which is best practice when messages are being published or read
+                // regularly.
+                //
+                // Create the clients that we'll use for sending and processing messages.
+                client = new ServiceBusClient(connectionString);
+                sender = client.CreateSender(queueName);
+
+                try
+                {
+                    ServiceBusMessage message = new ServiceBusMessage(JsonConvert.SerializeObject(playDetails));
+
+                    await sender.SendMessageAsync(message);
+                }
+                finally
+                {
+                    // Calling DisposeAsync on client types is required to ensure that network
+                    // resources and other unmanaged objects are properly cleaned up.
+                    await sender.DisposeAsync();
+                    await client.DisposeAsync();
+                }
             }
-            finally
+            catch (Exception ex)
             {
-                // Calling DisposeAsync on client types is required to ensure that network
-                // resources and other unmanaged objects are properly cleaned up.
-                await sender.DisposeAsync();
-                await client.DisposeAsync();
+                _logger.LogCritical(ex.ToString());
             }
         }
 

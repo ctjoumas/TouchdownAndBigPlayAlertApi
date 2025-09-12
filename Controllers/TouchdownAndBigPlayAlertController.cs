@@ -8,9 +8,16 @@ namespace TouchdownAndBigPlayAlertApi.Controllers
     {
         private readonly ParsePlayByPlay _parsePlayByPlay;
 
-        public TouchdownAndBigPlayAlertController(ParsePlayByPlay parsePlayByPlay)
+        /// <summary>
+        /// 
+        /// </summary>
+        //private readonly IOptions<AppConfiguration> _config;
+        private readonly IConfiguration _config;
+
+        public TouchdownAndBigPlayAlertController(ParsePlayByPlay parsePlayByPlay, IConfiguration config)
         {
             _parsePlayByPlay = parsePlayByPlay;
+            _config = config;
         }
 
         /// <summary>
@@ -43,7 +50,7 @@ namespace TouchdownAndBigPlayAlertApi.Controllers
         {
             try
             {
-                await _parsePlayByPlay.RunParser();
+                await _parsePlayByPlay.RunParser(_config);
                 return Ok(new { message = "Games processed successfully" });
             }
             catch (Exception ex)
