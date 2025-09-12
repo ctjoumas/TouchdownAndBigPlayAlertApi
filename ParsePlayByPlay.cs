@@ -394,7 +394,7 @@
                                                 if (bigPlayAdded)
                                                 {
                                                     log.LogInformation("Added big play for " + playDetails.PlayerName);
-                                                    await sendPlayMessage(playDetails, configuration);
+                                                    await sendPlayMessage(playDetails);
                                                 }
                                                 else
                                                 {
@@ -584,7 +584,7 @@
                                     {
                                         log.LogInformation(playDetails.Message);
 
-                                        await sendPlayMessage(playDetails, configuration);
+                                        await sendPlayMessage(playDetails);
                                     }
                                     else
                                     {
@@ -625,7 +625,7 @@
 
                     log.LogInformation(playDetails.Message);
 
-                    await sendPlayMessage(playDetails, configuration);
+                    await sendPlayMessage(playDetails);
                 }
                 else
                 {
@@ -845,36 +845,29 @@
         /// </summary>
         /// <param name="playDetails">The details of the particular play</param>
         /// <returns></returns>
-        private async Task sendPlayMessage(PlayDetails playDetails, IConfiguration configuration)
+        private async Task sendPlayMessage(PlayDetails playDetails)
         {
             try
             {
-                // connection string to your Service Bus namespace
-                string serviceBusSharedAccessSignature = configuration["ServiceBusSharedAccessKey"];
-                string connectionString = "Endpoint=sb://fantasyfootballstattracker.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=" + serviceBusSharedAccessSignature;
+                // service bus namespace
+                string serviceBusNamespace = "fantasyfootballstattracker.servicebus.windows.net";
 
-                // name of your Service Bus queue
+                // Service Bus queue name
                 string queueName = "touchdownqueue";
 
                 // the client that owns the connection and can be used to create senders and receivers
-                ServiceBusClient client;
+                ServiceBusClient client = new ServiceBusClient(serviceBusNamespace, new DefaultAzureCredential());
 
                 // the sender used to publish messages to the queue
-                ServiceBusSender sender;
-
-                // The Service Bus client types are safe to cache and use as a singleton for the lifetime
-                // of the application, which is best practice when messages are being published or read
-                // regularly.
-                //
-                // Create the clients that we'll use for sending and processing messages.
-                client = new ServiceBusClient(connectionString);
-                sender = client.CreateSender(queueName);
+                ServiceBusSender sender = client.CreateSender(queueName);
 
                 try
                 {
                     ServiceBusMessage message = new ServiceBusMessage(JsonConvert.SerializeObject(playDetails));
 
                     await sender.SendMessageAsync(message);
+
+                    _logger.LogInformation($"Successfully sent message to Service Bus for player: {playDetails.PlayerName}");
                 }
                 finally
                 {
