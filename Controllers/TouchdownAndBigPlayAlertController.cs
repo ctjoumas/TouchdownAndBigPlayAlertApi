@@ -9,17 +9,17 @@ namespace TouchdownAndBigPlayAlertApi.Controllers
     public class TouchdownAndBigPlayAlertController : ControllerBase
     {
         private readonly ParsePlayByPlay _parsePlayByPlay;
-
-        /// <summary>
-        /// 
-        /// </summary>
-        //private readonly IOptions<AppConfiguration> _config;
         private readonly IConfiguration _config;
+        private readonly ILogger<TouchdownAndBigPlayAlertController> _logger;
 
-        public TouchdownAndBigPlayAlertController(ParsePlayByPlay parsePlayByPlay, IConfiguration config)
+        public TouchdownAndBigPlayAlertController(
+            ParsePlayByPlay parsePlayByPlay, 
+            IConfiguration config,
+            ILogger<TouchdownAndBigPlayAlertController> logger)
         {
             _parsePlayByPlay = parsePlayByPlay;
             _config = config;
+            _logger = logger;
         }
 
         /// <summary>
@@ -93,12 +93,31 @@ namespace TouchdownAndBigPlayAlertApi.Controllers
         {
             try
             {
+                _logger.LogInformation("Starting parse-games endpoint at {Timestamp}", DateTime.UtcNow);
+                
                 await _parsePlayByPlay.RunParser(_config);
-                return Ok(new { message = "Games processed successfully" });
+                
+                _logger.LogInformation("Successfully completed parse-games endpoint at {Timestamp}", DateTime.UtcNow);
+                return Ok(new { message = "Games processed successfully", timestamp = DateTime.UtcNow });
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new { error = ex.Message });
+                _logger.LogError(ex, "CRITICAL ERROR in parse-games endpoint: {ErrorMessage}. StackTrace: {StackTrace}", 
+                    ex.Message, ex.StackTrace);
+                
+                // Log inner exception if it exists
+                if (ex.InnerException != null)
+                {
+                    _logger.LogError("Inner Exception: {InnerMessage}. InnerStackTrace: {InnerStackTrace}", 
+                        ex.InnerException.Message, ex.InnerException.StackTrace);
+                }
+                
+                return StatusCode(500, new { 
+                    error = ex.Message,
+                    type = ex.GetType().Name,
+                    innerError = ex.InnerException?.Message,
+                    stackTrace = ex.StackTrace
+                });
             }
         }
     }

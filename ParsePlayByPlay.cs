@@ -12,6 +12,7 @@
     public class ParsePlayByPlay
     {
         private readonly ILogger<ParsePlayByPlay> _logger;
+        private readonly IConfiguration _configuration;
 
         /// <summary>
         /// Session key for the Azure SQL Access token
@@ -26,9 +27,10 @@
         private const int RECEIVING_AND_RUSHING_BIG_PLAY_YARDAGE = 25;
         private const int PASSING_BIG_PLAY_YARDAGE = 40;
 
-        public ParsePlayByPlay(ILogger<ParsePlayByPlay> logger)
+        public ParsePlayByPlay(ILogger<ParsePlayByPlay> logger, IConfiguration configuration)
         {
             _logger = logger;
+            _configuration = configuration;
         }
 
         public async Task RunParser(IConfiguration config)
@@ -49,25 +51,7 @@
         {
             Hashtable gamesToParse = new Hashtable();
 
-            var connectionStringBuilder = new SqlConnectionStringBuilder
-            {
-                DataSource = "tcp:playersandschedulesdetails.database.windows.net,1433",
-                InitialCatalog = "PlayersAndSchedulesDetails",
-                TrustServerCertificate = false,
-                Encrypt = true
-            };
-
-            SqlConnection sqlConnection = new SqlConnection(connectionStringBuilder.ConnectionString);
-
-            try
-            {
-                string azureSqlToken = GetAzureSqlAccessToken();
-                sqlConnection.AccessToken = azureSqlToken;
-            }
-            catch (Exception e)
-            {
-                log.LogInformation(e.Message);
-            }
+            SqlConnection sqlConnection = CreateSqlConnection();
 
             using (sqlConnection)
             {
@@ -217,18 +201,18 @@
 
         private async Task ParsePlayerBigPlaysForGame(int espnGameId, JObject playByPlayJsonObject, List<PlayDetails> playersInGame, IConfiguration configuration, ILogger log)
         {
-            JToken driveTokens = playByPlayJsonObject.SelectToken("page.content.gamepackage.allPlys");
+            JToken allQuarterPlaysTokens = playByPlayJsonObject.SelectToken("page.content.gamepackage.pbp.allPlaysData");
 
-            // TODO: This logic will go through each drive. However, during a live game, we should only pull the last play of the drive, assuming that
+            // TODO: This logic will go through each play. However, during a live game, we should only pull the last play of the drive, assuming that
             // the other drives were already parsed based on how frequently the logic app calls this endpoint.
-            foreach (JToken quarterToken in driveTokens)
+            foreach (JToken quarterPlaysToken in allQuarterPlaysTokens)
             {
-                JToken quarterDrives = quarterToken.SelectToken("items");
+                JToken quarterPlays = quarterPlaysToken.SelectToken("items");
 
-                foreach (JToken quarterDrive in quarterDrives)
+                foreach (JToken quarterPlay in quarterPlays)
                 {
                     // get all of the plays in this drive
-                    JToken playTokens = quarterDrive.SelectToken("plays");
+                    JToken playTokens = quarterPlay.SelectToken("plays");
 
                     if (playTokens != null)
                     {
@@ -427,27 +411,29 @@
             bool touchdownProcessed = false;
 
             // As of 2025, this is now broken up by quarter, so we'll get one token for all quarters scoring summaries (plays)
-            JToken allQuartersScoringSummaries = (JArray)playByPlayJsonObject.SelectToken("page.content.gamepackage.scrSumm");
+            JToken allQuarterScoringPlaysTokens = playByPlayJsonObject.SelectToken("page.content.gamepackage.pbp.scoringPlaysData");
 
             // go through each quarter's scoring summaries
-            foreach (JToken quarterScoringSummaries in allQuartersScoringSummaries)
+            foreach (JToken quarterScoringPlayToken in allQuarterScoringPlaysTokens)
             {
                 // get all scoring plays for this quarter
-                JToken quarterScoringPlays = quarterScoringSummaries.SelectToken("items");
+                JToken quarterScoringPlays = quarterScoringPlayToken.SelectToken("items");
 
                 foreach (JToken quarterScoringPlay in quarterScoringPlays)
                 {
                     // the typeAbbreviation attribute will be "TD" for a touchdown
-                    string scoringType = ((JValue)quarterScoringPlay.SelectToken("typeAbbreviation")).Value.ToString();
+                    string scoringType = ((JValue)quarterScoringPlay.SelectToken("playTitle")).Value.ToString();
 
-                    if (scoringType.Equals("TD"))
+                    if (scoringType.Equals("Touchdown"))
                     {
                         string touchdownText = ((JValue)quarterScoringPlay.SelectToken("playText")).Value.ToString();
 
                         // we will cache the quarter and game clock so the next time we check the live JSON data, we don't
                         // send a message to the service bus that the same touchdown was scored
                         int quarter = int.Parse(quarterScoringPlay.SelectToken("periodNum").ToString());
-                        string gameClock = (string)((JValue)quarterScoringPlay.SelectToken("clock")).Value;
+                        // the time label will be something like "14:48 - 3rd"
+                        string gameClock = (string)((JValue)quarterScoringPlay.SelectToken("timeLabel")).Value;
+                        gameClock = gameClock.Substring(0, gameClock.IndexOf(" "));
 
                         // if this is a defensive touchdown, the defense name is not listed in the text, so if the text falls
                         // into this case, we won't loop through all players, but we'll find out based on the teamId of this
@@ -483,6 +469,14 @@
                             PlayDetails playDetails = GetDefenseWhoScoredTouchdown(playByPlayJsonObject, quarterScoringPlay, playersInGame);
 
                             string touchdownMessage = "🎉 Defensive Touchdown! " + playDetails.PlayerName + " just returned a punt for a TD!";
+
+                            await SendDefensiveTouchdownMessage(espnGameId, playDetails, quarterScoringPlay, playersInGame, quarter, gameClock, "", configuration, log);
+                        }
+                        else if (touchdownText.ToLower().Contains("kickoff return"))
+                        {
+                            PlayDetails playDetails = GetDefenseWhoScoredTouchdown(playByPlayJsonObject, quarterScoringPlay, playersInGame);
+
+                            string touchdownMessage = "🎉 Defensive Touchdown! " + playDetails.PlayerName + " just returned a kickoff for a TD!";
 
                             await SendDefensiveTouchdownMessage(espnGameId, playDetails, quarterScoringPlay, playersInGame, quarter, gameClock, "", configuration, log);
                         }
@@ -847,15 +841,25 @@
         /// <returns></returns>
         private async Task sendPlayMessage(PlayDetails playDetails)
         {
+            // Check if we should skip Service Bus (for local development with corporate restrictions)
+            string skipServiceBus = _configuration.GetValue<string>("SkipServiceBusForLocalDev");
+            
+            if (!string.IsNullOrEmpty(skipServiceBus) && skipServiceBus.Equals("true", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning($"LOCAL DEV MODE: Skipping Service Bus send for player: {playDetails.PlayerName}. Message would have been: {playDetails.Message}");
+                return; // Skip Service Bus in local development
+            }
+
             try
             {
-                // service bus namespace
-                string serviceBusNamespace = "fantasyfootballstattracker.servicebus.windows.net";
-
-                // Service Bus queue name
                 string queueName = "touchdownqueue";
-
-                // the client that owns the connection and can be used to create senders and receivers
+                string serviceBusNamespace = "fantasyfootballstattracker.servicebus.windows.net";
+                
+                // Use DefaultAzureCredential for both local and Azure
+                // Local: Uses Azure CLI credentials (after 'az login')
+                // Azure: Uses managed identity
+                _logger.LogInformation("Connecting to Service Bus using DefaultAzureCredential (Azure CLI for local, Managed Identity for Azure)");
+                
                 ServiceBusClient client = new ServiceBusClient(serviceBusNamespace, new DefaultAzureCredential());
 
                 // the sender used to publish messages to the queue
@@ -879,7 +883,8 @@
             }
             catch (Exception ex)
             {
-                _logger.LogCritical(ex.ToString());
+                _logger.LogError(ex, "Failed to send message to Service Bus");
+                throw; // Re-throw to see the error in the API response
             }
         }
 
@@ -897,6 +902,50 @@
         }
 
         /// <summary>
+        /// Creates a SQL connection that works both locally (with SQL auth) and in Azure (with managed identity)
+        /// </summary>
+        /// <returns></returns>
+        private SqlConnection CreateSqlConnection()
+        {
+            var connectionStringBuilder = new SqlConnectionStringBuilder
+            {
+                DataSource = "tcp:playersandschedulesdetails.database.windows.net,1433",
+                InitialCatalog = "PlayersAndSchedulesDetails",
+                TrustServerCertificate = false,
+                Encrypt = true
+            };
+
+            // Check if we have a connection string with username/password (for local development)
+            string localConnectionString = _configuration.GetConnectionString("PlayersAndSchedulesDetails");
+            
+            if (!string.IsNullOrEmpty(localConnectionString))
+            {
+                // Local development: use SQL authentication
+                _logger.LogInformation("Using SQL authentication for local development");
+                return new SqlConnection(localConnectionString);
+            }
+            else
+            {
+                // Azure: use managed identity
+                _logger.LogInformation("Using managed identity authentication for Azure");
+                SqlConnection sqlConnection = new SqlConnection(connectionStringBuilder.ConnectionString);
+                
+                try
+                {
+                    string azureSqlToken = GetAzureSqlAccessToken();
+                    sqlConnection.AccessToken = azureSqlToken;
+                }
+                catch (Exception e)
+                {
+                    _logger.LogError(e, "Failed to get Azure SQL access token");
+                    throw;
+                }
+                
+                return sqlConnection;
+            }
+        }
+
+        /// <summary>
         /// Updates the TouchdownDetails table with a particular occurence of a touchdown. This touchdown has not already been
         /// parsed for this game.
         /// </summary>
@@ -910,25 +959,7 @@
         {
             bool touchdownAdded = false;
 
-            var connectionStringBuilder = new SqlConnectionStringBuilder
-            {
-                DataSource = "tcp:playersandschedulesdetails.database.windows.net,1433",
-                InitialCatalog = "PlayersAndSchedulesDetails",
-                TrustServerCertificate = false,
-                Encrypt = true
-            };
-
-            SqlConnection sqlConnection = new SqlConnection(connectionStringBuilder.ConnectionString);
-
-            try
-            {
-                string azureSqlToken = GetAzureSqlAccessToken();
-                sqlConnection.AccessToken = azureSqlToken;
-            }
-            catch (Exception e)
-            {
-                log.LogInformation(e.Message);
-            }
+            SqlConnection sqlConnection = CreateSqlConnection();
 
             // Get current EST time - If this is run on a machine with a differnet local time, DateTime.Now will not return the proper time
             TimeZoneInfo easternZone = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
@@ -976,25 +1007,7 @@
         {
             bool bigPlayAdded = false;
 
-            var connectionStringBuilder = new SqlConnectionStringBuilder
-            {
-                DataSource = "tcp:playersandschedulesdetails.database.windows.net,1433",
-                InitialCatalog = "PlayersAndSchedulesDetails",
-                TrustServerCertificate = false,
-                Encrypt = true
-            };
-
-            SqlConnection sqlConnection = new SqlConnection(connectionStringBuilder.ConnectionString);
-
-            try
-            {
-                string azureSqlToken = GetAzureSqlAccessToken();
-                sqlConnection.AccessToken = azureSqlToken;
-            }
-            catch (Exception e)
-            {
-                log.LogInformation(e.Message);
-            }
+            SqlConnection sqlConnection = CreateSqlConnection();
 
             // Get current EST time - If this is run on a machine with a differnet local time, DateTime.Now will not return the proper time
             TimeZoneInfo easternZone = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
