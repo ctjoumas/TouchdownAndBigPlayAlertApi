@@ -452,33 +452,49 @@
                         {
                             PlayDetails playDetails = GetDefenseWhoScoredTouchdown(playByPlayJsonObject, quarterScoringPlay, playersInGame);
 
-                            string touchdownMessage = "🎉 Defensive Touchdown! " + playDetails.PlayerName + " blocked a kick and returned it for a TD!";
+                            // if no owner had this defense, playDetails will be null
+                            if (playDetails != null)
+                            {
+                                string touchdownMessage = "🎉 Defensive Touchdown! " + playDetails.PlayerName + " blocked a kick and returned it for a TD!";
 
-                            await SendDefensiveTouchdownMessage(espnGameId, playDetails, quarterScoringPlay, playersInGame, quarter, gameClock, "", configuration, log);
+                                await SendDefensiveTouchdownMessage(espnGameId, playDetails, quarterScoringPlay, playersInGame, quarter, gameClock, "", configuration, log);
+                            }
                         }
                         else if (touchdownText.ToLower().Contains("interception return"))
                         {
                             PlayDetails playDetails = GetDefenseWhoScoredTouchdown(playByPlayJsonObject, quarterScoringPlay, playersInGame);
 
-                            string touchdownMessage = "🎉 Defensive Touchdown! " + playDetails.PlayerName + " just got a pick 6!";
+                            // if no owner had this defense, playDetails will be null
+                            if (playDetails != null)
+                            {
+                                string touchdownMessage = "🎉 Defensive Touchdown! " + playDetails.PlayerName + " just got a pick 6!";
 
-                            await SendDefensiveTouchdownMessage(espnGameId, playDetails, quarterScoringPlay, playersInGame, quarter, gameClock, "", configuration, log);
+                                await SendDefensiveTouchdownMessage(espnGameId, playDetails, quarterScoringPlay, playersInGame, quarter, gameClock, "", configuration, log);
+                            }
                         }
                         else if (touchdownText.ToLower().Contains("punt return"))
                         {
                             PlayDetails playDetails = GetDefenseWhoScoredTouchdown(playByPlayJsonObject, quarterScoringPlay, playersInGame);
 
-                            string touchdownMessage = "🎉 Defensive Touchdown! " + playDetails.PlayerName + " just returned a punt for a TD!";
+                            // if no owner had this defense, playDetails will be null
+                            if (playDetails != null)
+                            {
+                                string touchdownMessage = "🎉 Defensive Touchdown! " + playDetails.PlayerName + " just returned a punt for a TD!";
 
-                            await SendDefensiveTouchdownMessage(espnGameId, playDetails, quarterScoringPlay, playersInGame, quarter, gameClock, "", configuration, log);
+                                await SendDefensiveTouchdownMessage(espnGameId, playDetails, quarterScoringPlay, playersInGame, quarter, gameClock, "", configuration, log);
+                            }
                         }
                         else if (touchdownText.ToLower().Contains("kickoff return"))
                         {
                             PlayDetails playDetails = GetDefenseWhoScoredTouchdown(playByPlayJsonObject, quarterScoringPlay, playersInGame);
 
-                            string touchdownMessage = "🎉 Defensive Touchdown! " + playDetails.PlayerName + " just returned a kickoff for a TD!";
+                            // if no owner had this defense, playDetails will be null
+                            if (playDetails != null)
+                            {
+                                string touchdownMessage = "🎉 Defensive Touchdown! " + playDetails.PlayerName + " just returned a kickoff for a TD!";
 
-                            await SendDefensiveTouchdownMessage(espnGameId, playDetails, quarterScoringPlay, playersInGame, quarter, gameClock, "", configuration, log);
+                                await SendDefensiveTouchdownMessage(espnGameId, playDetails, quarterScoringPlay, playersInGame, quarter, gameClock, "", configuration, log);
+                            }
                         }
                         // it's an offensive TD
                         else
@@ -798,7 +814,7 @@
         }
 
         /// <summary>
-        /// Gets the PlayDetails (player) of the defense that scored a defensive touchdown based on the teamId
+        /// Gets the PlayDetails of the defense that scored a defensive touchdown based on the teamId
         /// present in the scoring play token, which we use to get the team name (such as Indianapolis Colts).
         /// </summary>
         /// <param name="playByPlayJsonObject">The JSON object of the play by play</param>
@@ -828,7 +844,7 @@
                 }
             }
 
-            // check to see if this defense exists in the players in the game
+            // check to see if this defense exists in the players in the game. If this is null, no owner has this defense
             var playDetails = playersInGame.SingleOrDefault(x => x.PlayerName.ToLower().Equals(teamNameOfScoringDefense.ToLower()));
 
             return playDetails;
